@@ -1,24 +1,27 @@
-require 'bundler/setup'
 require 'beaneater'
 require 'json'
-require 'logger'
- 
-@processing = true
-@bt = Beaneater::Pool.new ["localhost:11300"]
-@logger = Logger.new(STDOUT)
- 
-def process_job job
-  body = JSON.parse job.body
-  @logger.info body.inspect
-  parsed_job = body["job"]
-  case parsed_job["type"]
-    when "quit" then @processing = false
-  end
+require 'redis'
+
+TUBE_NAME = 'factorial'
+beaneater = Beaneater::Pool.new(['localhost:11300'])
+tube = beaneater.tubes[TUBE_NAME]
+redis = Redis.new
+loop do
+  job = tube.reserve
+  puts "Start Processing ID: "+ job.body
+  #set status as processing
+  params = JSON.parse(redis.get TUBE_NAME + job.body)
+  params[:status] = :processing
+  redis.set TUBE_NAME + job.body, params.to_json
+
+  #get fact base
+  fact_base = params["param"].to_i
+  result = ((1..fact_base).inject(:*) || 1).to_s
+
+  #update status in memory
+  params[:status] = :done
+  params[:result] = result
+  redis.set TUBE_NAME + job.body, params.to_json
+  puts "Stop Processing ID: "+ job.body # prints "hello"
   job.delete
-end
- 
-while @processing do
-    job = @bt.tubes.reserve
-    @logger.info job.inspect
-    process_job job
 end
